@@ -1,6 +1,8 @@
 import httpx
 from fastapi import HTTPException, status
 from app.core.config import settings
+import hmac
+import hashlib
 
 class PaymobService:
     def __init__(self):
@@ -128,3 +130,38 @@ class PaymobService:
                 
             # Paymob returns a JSON containing a 'redirect_url' for wallets
             return response.json().get("redirect_url")
+    
+    def verify_webhook_mac(self, hmac_received: str, payload_obj: dict) -> bool:
+        """
+        Validates the HMAC sent by Paymob against the calculated HMAC from the payload.
+        Paymob requires specific keys to be concatenated in a strict alphabetical order.
+        """
+        hmac_keys = [
+            "amount_cents", "created_at", "currency", "error_occured",
+            "has_parent_transaction", "id", "integration_id", "is_3d_secure",
+            "is_auth", "is_capture", "is_refunded", "is_standalone_payment",
+            "is_voided", "order.id", "owner", "pending", "source_data.pan",
+            "source_data.sub_type", "source_data.type", "success"
+        ]
+        
+        concatenated_string = ""
+        
+        for key in hmac_keys:
+            if "." in key:
+                parent_key, child_key = key.split(".")
+                value = payload_obj.get(parent_key, {}).get(child_key, "")
+            else:
+                value = payload_obj.get(key, "")
+                
+            if isinstance(value, bool):
+                value = str(value).lower()
+                
+            concatenated_string += str(value)
+            
+        calculated_hmac = hmac.new(
+            settings.PAYMOB_HMAC_SECRET.encode("utf-8"),
+            concatenated_string.encode("utf-8"),
+            hashlib.sha512
+        ).hexdigest()
+        
+        return hmac.compare_digest(calculated_hmac, hmac_received)

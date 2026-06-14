@@ -242,36 +242,38 @@ async def paymob_webhook(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    # 1. Get the JSON payload sent by Paymob
-    payload = await request.json()
+    # 1. Get the HMAC from the query parameters sent by Paymob
+    hmac_received = request.query_params.get("hmac")
     
-    # 2. Check if the event type is a transaction callback
+    if not hmac_received:
+        raise HTTPException(status_code=401, detail="Missing HMAC parameter")
+
+    # 2. Get the JSON payload
+    payload = await request.json()
+    obj = payload.get("obj", {})
+    
+    # 3. Validate the HMAC signature to ensure the request is authentically from Paymob
+    if not paymob_service.verify_webhook_mac(hmac_received, obj):
+        raise HTTPException(status_code=401, detail="Invalid HMAC signature")
+    
+    # 4. Check if the event type is a transaction callback
     if payload.get("type") == "TRANSACTION":
-        obj = payload.get("obj", {})
         success = obj.get("success", False)
         merchant_order_id = obj.get("order", {}).get("merchant_order_id", "")
         
-        # 3. Extract the actual order ID from our custom string (order_id_timestamp)
         try:
             actual_order_id_str = merchant_order_id.split("_")[0]
             order_id = int(actual_order_id_str)
         except (ValueError, IndexError):
-            # If the format is unexpected, return 200 so Paymob stops retrying
             return {"status": "ignored", "reason": "Invalid merchant_order_id format"}
             
-        # 4. Find the order in the database
         order = db.query(Order).filter(Order.id == order_id).first()
         
         if order:
-            # 5. Update the order status based on payment result
             if success:
-                # Assuming you have a PROCESSING or PAID status in your Enum
-                # We will update it from PENDING to the next logical step
                 order.status = OrderStatus.PROCESSING 
                 db.commit()
             else:
-                # If payment failed, you can log it or change status to CANCELLED/FAILED
                 pass
                 
-    # Always return 200 OK so Paymob knows the webhook was received successfully
     return {"status": "success"}

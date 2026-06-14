@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     PAYMOB_API_KEY: str
     PAYMOB_CARD_INTEGRATION_ID: int
     PAYMOB_WALLET_INTEGRATION_ID: int
+    PAYMOB_HMAC_SECRET: str
 
     class Config:
         env_file = ".env"
