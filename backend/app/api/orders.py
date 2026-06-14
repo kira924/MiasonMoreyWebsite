@@ -6,6 +6,7 @@ import time
 from app.core.database import get_db
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.cart import CartItem
+from app.models.products import Product
 from app.models.address import Address
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderResponse, OrderStatusUpdate
