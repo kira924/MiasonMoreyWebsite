@@ -13,6 +13,7 @@ from app.api.deps import get_current_admin_user
 from app.api.deps import get_current_active_user
 from app.schemas.order import PaymentRequest
 from app.services.paymob import PaymobService
+from fastapi.responses import RedirectResponse
 
 # Initialize the router for orders
 router = APIRouter(
@@ -269,11 +270,63 @@ async def paymob_webhook(
             
         order = db.query(Order).filter(Order.id == order_id).first()
         
+        # ... inside the webhook, after finding the order ...
         if order:
             if success:
-                order.status = OrderStatus.PROCESSING 
-                db.commit()
+                try:
+                    # 1. Update order status to PROCESSING
+                    order.status = OrderStatus.PROCESSING 
+                    
+                    # 2. Deduct inventory with Row-Level Locking to prevent race conditions
+                    for order_item in order.items:
+                        # Lock the specific product row until this transaction is committed or rolled back
+                        product = db.query(Product).with_for_update().filter(Product.id == order_item.product_id).first()
+                        
+                        if product:
+                            if product.stock >= order_item.quantity:
+                                product.stock -= order_item.quantity
+                            else:
+                                # Handle out of stock scenario gracefully
+                                product.stock = 0 
+                                
+                    # 3. Clear the user's cart
+                    db.query(CartItem).filter(CartItem.user_id == order.user_id).delete()
+                    
+                    # 4. Commit the transaction (All operations succeed together)
+                    db.commit()
+                    
+                except Exception as e:
+                    # 5. Rollback the transaction if any error occurs (All operations fail together)
+                    db.rollback()
+                    # You should log the exception 'e' here using your logger
             else:
-                pass
+                try:
+                    order.status = OrderStatus.FAILED
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
                 
     return {"status": "success"}
+
+@router.get("/payment/callback")
+async def payment_response_callback(request: Request):
+    # Paymob sends the transaction result as query parameters in the URL
+    query_params = request.query_params
+    success = query_params.get("success")
+    merchant_order_id = query_params.get("merchant_order_id", "")
+    
+    # Extract our original order ID
+    order_id = merchant_order_id.split("_")[0] if "_" in merchant_order_id else merchant_order_id
+    
+    # Define your frontend URLs (Assuming your frontend runs on port 3000 locally)
+    # In production, this will be your actual domain (e.g., https://miasonmorey.com)
+    frontend_base_url = "http://localhost:3000"
+    
+    if success == "true":
+        # Redirect the user to the success page on your frontend
+        redirect_url = f"{frontend_base_url}/payment-success?order_id={order_id}"
+    else:
+        # Redirect the user to the failure page on your frontend
+        redirect_url = f"{frontend_base_url}/payment-failed?order_id={order_id}"
+        
+    return RedirectResponse(url=redirect_url)
