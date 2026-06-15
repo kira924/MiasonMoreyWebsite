@@ -57,6 +57,7 @@ Create a `.env` file in the root directory and configure the following variables
 ```env
 # Database Configuration
 DATABASE_URL=postgresql://user:password@localhost/dbname
+SECRET_KEY= ####
 
 # Paymob Configuration
 PAYMOB_API_KEY=your_api_key
