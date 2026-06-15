@@ -7,6 +7,9 @@ from app.core.database import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.core.security import create_access_token
+from app.api.deps import get_current_user
+from app.schemas.user import UserCreate, UserResponse, Token, UserUpdate
+from app.api.deps import get_current_user, get_current_active_user
 
 # Initialize the router for authentication endpoints
 router = APIRouter(
@@ -58,3 +61,35 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
     access_token = create_access_token(data={"sub": user.email})
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/me", response_model=UserResponse)
+def read_users_me(current_user: User = Depends(get_current_user)):
+    # This route is protected, it will only run if a valid token is provided
+    return current_user
+
+@router.patch("/me", response_model=UserResponse)
+def update_user_me(
+    user_in: UserUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    # Update full name if provided
+    if user_in.full_name is not None:
+        current_user.full_name = user_in.full_name
+        
+    # Update email if provided and not already taken
+    if user_in.email is not None and user_in.email != current_user.email:
+        existing_user = db.query(User).filter(User.email == user_in.email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered by another user")
+        current_user.email = user_in.email
+
+    # Update password if provided
+    if user_in.password is not None:
+        current_user.hashed_password = pwd_context.hash(user_in.password)
+
+    # Save changes to the database
+    db.commit()
+    db.refresh(current_user)
+    
+    return current_user

@@ -12,7 +12,7 @@ ALGORITHM = "HS256"
 
 if not SECRET_KEY:
     raise ValueError("No SECRET_KEY set for JWT generation. Check your .env file.")
-
+    
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 def create_access_token(data: dict):
